@@ -98,11 +98,30 @@ def scrape_pronote():
             page.fill('#username', PRONOTE_USER)
             page.fill('#password', PRONOTE_PASS)
             page.click('#bouton_valider')
+            page.wait_for_timeout(10000)
+            
+            # Attendre que la page soit complètement chargée
+            page.wait_for_load_state('networkidle', timeout=30000)
             page.wait_for_timeout(5000)
-            page.wait_for_selector('[data-dnma-outil="PRONOTE"]', timeout=60000)
+            
+            # Chercher le lien Pronote avec plusieurs sélecteurs possibles
+            pronote_link = None
+            selectors = [
+                '[data-dnma-outil="PRONOTE"]',
+                'a:has-text("Pronote")',
+                '.card[data-application-urls*="pronote"] a',
+            ]
+            
+            for selector in selectors:
+                if page.locator(selector).count() > 0:
+                    print(f'🔍 Bouton Pronote trouvé avec: {selector}')
+                    pronote_link = page.locator(selector).first
+                    break
+            
+            if not pronote_link:
+                raise Exception('Bouton Pronote introuvable avec tous les sélecteurs')
 
             # Ouvrir Pronote
-            pronote_link = page.locator('[data-dnma-outil="PRONOTE"]')
             try:
                 with ctx.expect_page(timeout=8000) as new_page_info:
                     pronote_link.click()
