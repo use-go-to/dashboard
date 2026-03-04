@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: dashboard-iot
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      python -m playwright install chromium
+      python -m playwright install-deps chromium
+    startCommand: gunicorn --worker-class gevent -w 1 --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PRONOTE_USER
+        value: d.lecointre10
+      - key: PRONOTE_PASS
+        value: David@35160
+      - key: WEATHER_LAT
+        value: "48.1373"
+      - key: WEATHER_LON
+        value: "-1.9549"
+      - key: WEBHOOK_SECRET
+        value: change_me_secret
+      # Optionnel - décommentez et remplissez si vous avez une clé
+      # - key: PERPLEXITY_API_KEY
+      #   value: votre_clé_ici

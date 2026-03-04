@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="screen-orientation" content="landscape">
+    <title>Dashboard IoT</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/movie-calendar.js"></script>
+    <script src="/static/chat-notifications.js"></script>
+    <script src="/static/sounds.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            background: #0a0e1a; color: #e8eaf0; overflow: hidden; height: 100vh; width: 100vw;
+        }
+        @media screen and (orientation: portrait) {
+            body:not(.sms-open) .container { display: none !important; }
+            body:not(.sms-open) .orientation-warning { display: flex !important; }
+        }
+        .orientation-warning {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #0a0e1a; z-index: 99999; justify-content: center; align-items: center;
+            flex-direction: column; text-align: center; padding: 40px;
+        }
+        body:not(.sms-open) .orientation-warning .warning-text::after { content: "Mode Paysage requis"; }
+        body.sms-open .orientation-warning .warning-text::after { content: "Mode Portrait requis"; }
+        @media screen and (orientation: landscape) {
+            body.sms-open .orientation-warning { display: flex; }
+            body.sms-open .container, body.sms-open .modal { display: none !important; }
+        }
+        .container { max-width: 100%; margin: 0; padding: 10px; height: 100vh; display: flex; flex-direction: column; }
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; animation: fadeIn 0.6s ease; padding: 0 20px; gap: 10px;
+        }
+        .calendar-btn {
+            background: rgba(74,158,255,0.2); border: 2px solid rgba(74,158,255,0.4);
+            border-radius: 12px; padding: 8px 16px; cursor: pointer; transition: all 0.3s ease;
+            display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #4a9eff;
+        }
+        .calendar-btn:hover { background: rgba(74,158,255,0.3); transform: scale(1.05); }
+        .header-side { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 80px; }
+        .header-side-label { font-size: 10px; opacity: 0.5; color: #8b92a8; text-transform: uppercase; letter-spacing: 0.5px; }
+        .header-side-value { font-size: 16px; font-weight: 600; color: #4a9eff; }
+        .date-time { display: flex; flex-direction: column; gap: 2px; }
+        .date { font-size: 16px; font-weight: 400; opacity: 0.7; color: #8b92a8; }
+        .time { font-size: 48px; font-weight: 600; letter-spacing: -1px; color: #4a9eff; }
+        .refresh-btn {
+            background: rgba(255,255,255,0.15); border: none; color: white; padding: 8px 16px;
+            border-radius: 12px; font-size: 12px; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.3s ease;
+        }
+        .refresh-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
+        .grid {
+            display: grid; grid-template-columns: 1.5fr 1fr 1fr; grid-template-rows: auto auto;
+            gap: 8px; flex: 1; margin-bottom: 8px; min-height: 0;
+        }
+        .card {
+            background: rgba(30,35,50,0.6); backdrop-filter: blur(20px); border-radius: 20px;
+            padding: 16px; display: flex; flex-direction: column; justify-content: center;
+            transition: all 0.3s ease; animation: slideUp 0.6s ease; border: 1px solid rgba(74,158,255,0.2);
+            min-height: 0; cursor: pointer; overflow: hidden;
+        }
+        .card:hover { transform: translateY(-3px); background: rgba(30,35,50,0.8); border-color: rgba(74,158,255,0.4); }
+        .card:active { transform: scale(0.98); }
+        .card-large { grid-row: span 2; }
+        .card-label { font-size: 13px; opacity: 0.6; font-weight: 500; margin-bottom: 6px; color: #8b92a8; text-transform: uppercase; letter-spacing: 0.5px; }
+        .card-value { font-size: 36px; font-weight: 700; line-height: 1; color: #e8eaf0; }
+        .card-icon { font-size: 50px; margin: 8px 0; }
+        .card-subtitle { font-size: 13px; opacity: 0.6; margin-top: 6px; color: #8b92a8; font-weight: 500; }
+        .note-item {
+            background: rgba(74,158,255,0.1); padding: 6px 10px; border-radius: 8px; margin-bottom: 4px;
+            display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(74,158,255,0.2);
+        }
+        .note-matiere { font-size: 11px; opacity: 0.8; color: #8b92a8; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+        .note-value { font-size: 12px; font-weight: 700; color: #4a9eff; white-space: nowrap; }
+        .footer { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; animation: fadeIn 0.8s ease; }
+        .vignette {
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(20px); border-radius: 12px;
+            padding: 10px 15px; display: flex; align-items: center; gap: 10px; cursor: pointer;
+            transition: all 0.3s ease; border: 1px solid rgba(255,255,255,0.2);
+        }
+        .vignette:hover { background: rgba(255,255,255,0.2); transform: scale(1.02); }
+        .vignette:active { transform: scale(0.98); }
+        .vignette-icon { font-size: 24px; }
+        .vignette-text { flex: 1; }
+        .vignette-title { font-size: 13px; font-weight: 500; }
+        .vignette-count { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+        .modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(10,14,26,0.95); backdrop-filter: blur(10px); z-index: 1000; animation: fadeIn 0.3s ease;
+        }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .modal-content {
+            background: #0a0e1a; border-radius: 16px; padding: 20px; max-width: 95vw;
+            max-height: 85vh; overflow-y: auto; width: 95%; animation: slideUp 0.4s ease;
+            border: 1px solid rgba(74,158,255,0.3);
+        }
+        .modal-header { display: flex; justify-content: center; align-items: center; margin-bottom: 15px; }
+        .modal-title { font-size: 22px; font-weight: 600; color: #4a9eff; }
+        .news-item, .movie-item {
+            background: rgba(30,35,50,0.6); border-radius: 12px; padding: 14px; margin-bottom: 10px;
+            transition: all 0.3s ease; border: 1px solid rgba(74,158,255,0.2); cursor: pointer;
+        }
+        .news-item:hover, .movie-item:hover { background: rgba(30,35,50,0.8); transform: scale(1.01); border-color: rgba(74,158,255,0.4); }
+        .news-title, .movie-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: #e8eaf0; }
+        .news-summary, .movie-synopsis {
+            font-size: 13px; opacity: 0.7; line-height: 1.6; white-space: pre-wrap;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #8b92a8;
+        }
+        .expanded .news-summary, .expanded .movie-synopsis { display: block; -webkit-line-clamp: unset; }
+        .news-item.fullscreen, .movie-item.fullscreen {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; margin: 0;
+            overflow-y: auto; z-index: 10000; padding: 40px; background: #0a0e1a !important;
+            opacity: 1 !important; backdrop-filter: none; display: block;
+            border: 1px solid rgba(74,158,255,0.3); transform: none;
+        }
+        .news-item.fullscreen .news-title, .movie-item.fullscreen .movie-title { font-size: 24px; margin-bottom: 20px; }
+        .news-item.fullscreen .news-summary, .movie-item.fullscreen .movie-synopsis {
+            font-size: 18px; line-height: 2.2; display: block !important;
+            -webkit-line-clamp: unset !important; max-height: none !important; overflow: visible !important;
+        }
+        .cinema-section { margin-bottom: 15px; }
+        .cinema-name { font-size: 18px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid rgba(74,158,255,0.3); color: #4a9eff; }
+        .movie-item { display: flex; gap: 10px; }
+        .movie-poster { width: 60px; height: 85px; border-radius: 6px; object-fit: cover; background: rgba(255,255,255,0.1); flex-shrink: 0; }
+        .movie-info { flex: 1; }
+        .movie-showtimes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+        .showtime { background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 500; }
+        .chat-container { display: flex; flex-direction: column; height: 70vh; }
+        .chat-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .chat-clear { background: rgba(255,255,255,0.2); border: none; color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer; transition: all 0.3s ease; }
+        .chat-clear:hover { background: rgba(255,255,255,0.3); }
+        .chat-messages { flex: 1; overflow-y: auto; margin-bottom: 15px; }
+        .chat-message { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 15px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); animation: slideUp 0.3s ease; }
+        .chat-message.user { background: linear-gradient(135deg, rgba(102,126,234,0.4), rgba(118,75,162,0.4)); margin-left: 15%; border-left: 3px solid rgba(102,126,234,0.8); }
+        .chat-message.ai { background: rgba(255,255,255,0.15); margin-right: 15%; border-left: 3px solid rgba(255,255,255,0.5); cursor: pointer; transition: all 0.3s ease; }
+        .chat-message.ai:hover { background: rgba(255,255,255,0.2); transform: scale(1.02); }
+        .chat-message.ai.fullscreen { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; width: 95vw; height: 90vh; overflow-y: auto; z-index: 10000; padding: 40px; background: #0a0e1a; opacity: 1; }
+        .chat-message.ai.fullscreen .chat-text { font-size: 18px; line-height: 2.2; }
+        body.modal-open { overflow: hidden; }
+        .chat-label { font-size: 10px; opacity: 0.7; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .chat-text { font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+        .chat-input-container { display: flex; gap: 8px; }
+        .chat-input { flex: 1; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 12px; padding: 12px 15px; color: white; font-size: 12px; transition: all 0.3s ease; }
+        .chat-input:focus { outline: none; background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); }
+        .chat-input::placeholder { color: rgba(255,255,255,0.5); }
+        .chat-send { background: linear-gradient(135deg, rgba(102,126,234,0.6), rgba(118,75,162,0.6)); border: none; color: white; padding: 12px 24px; border-radius: 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .chat-send:hover { background: linear-gradient(135deg, rgba(102,126,234,0.8), rgba(118,75,162,0.8)); transform: scale(1.05); }
+        #chart-container { height: 250px; margin-top: 15px; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 10px; }
+        .calendar-event { background: rgba(30,35,50,0.8); border-radius: 12px; padding: 18px; margin-bottom: 12px; border-left: 4px solid #4a9eff; }
+        .calendar-time { font-size: 20px; font-weight: 700; color: #4a9eff; margin-bottom: 8px; }
+        .calendar-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+        .calendar-location { font-size: 14px; opacity: 0.7; margin-top: 6px; }
+        .calendar-auth { text-align: center; padding: 40px; }
+        .calendar-auth-btn { background: linear-gradient(135deg, rgba(102,126,234,0.6), rgba(118,75,162,0.6)); border: none; color: white; padding: 15px 30px; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .weather-day { background: rgba(30,35,50,0.8); border-radius: 12px; padding: 20px; margin-bottom: 12px; border: 1px solid rgba(74,158,255,0.3); }
+        .weather-day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid rgba(74,158,255,0.2); }
+        .weather-day-name { font-size: 18px; font-weight: 600; color: #4a9eff; }
+        .weather-day-icon { font-size: 40px; }
+        .weather-day-temp { font-size: 28px; font-weight: 700; }
+        .weather-day-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+        .weather-detail-item { display: flex; align-items: center; gap: 8px; }
+        .loading { text-align: center; padding: 30px; font-size: 14px; opacity: 0.7; }
+        .sms-notification {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: linear-gradient(135deg, rgba(102,126,234,0.95), rgba(118,75,162,0.95));
+            color: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 9999; animation: slideInDown 0.3s ease; max-width: 400px;
+            cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+        }
+        @keyframes slideInDown { from { transform: translate(-50%, -100px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+        .sms-notification-header { font-weight: 600; margin-bottom: 5px; font-size: 14px; }
+        .sms-notification-body { font-size: 13px; opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <script>
+        const socket = io();
+        socket.on('connect', () => console.log('⚡ WebSocket OK'));
+        socket.on('urgent_alert', (data) => {
+            if (typeof showUrgentAlert === 'function') showUrgentAlert(data.sender);
+        });
+        socket.on('new_sms', (data) => {
+            if (!document.getElementById('modal-sms').classList.contains('active')) {
+                checkNewSMS();
+            } else {
+                loadSMS(true);
+            }
+        });
+    </script>
+
+    <div class="orientation-warning">
+        <div style="font-size: 60px; margin-bottom: 30px;">📱</div>
+        <div class="warning-text" style="font-size: 24px; font-weight: 600; margin-bottom: 15px;"></div>
+        <div style="font-size: 16px; opacity: 0.8;">Pour afficher le contenu, tournez votre écran...</div>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <div class="header-side">
+                <div class="header-side-label">Lever ☀️</div>
+                <div class="header-side-value" id="sunrise">--:--</div>
+            </div>
+            <div class="calendar-btn" onclick="openModal('calendar')">
+                <span>📅</span>
+                <span id="calendar-count-header">Agenda</span>
+            </div>
+            <div class="date-time">
+                <div class="date" id="date">Chargement...</div>
+                <div class="time" id="time">--:--</div>
+            </div>
+            <button id="sound-toggle-btn" onclick="toggleNotificationSound()" style="background:rgba(74,158,255,0.2);border:2px solid rgba(74,158,255,0.4);border-radius:12px;padding:8px 12px;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:6px;font-size:20px;">
+                <span id="sound-toggle-icon">🔔</span>
+            </button>
+            <div class="header-side">
+                <div class="header-side-label">Coucher 🌙</div>
+                <div class="header-side-value" id="sunset">--:--</div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card card-large" onclick="openModal('weather')">
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;cursor:pointer;">
+                    <div class="card-label">Météo</div>
+                    <div class="card-icon" id="weather-icon">🌤️</div>
+                    <div class="card-value" id="temperature">--°</div>
+                    <div class="card-subtitle" id="weather-condition">Chargement...</div>
+                    <div style="display:flex;gap:15px;margin-top:10px;font-size:11px;opacity:0.8;">
+                        <span>🌡️ <span id="temp-feel">--</span>°</span>
+                        <span>💧 <span id="humidity">--</span>%</span>
+                        <span>💨 <span id="wind">--</span>km/h</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card" onclick="openModal('moyenne')">
+                <div class="card-label">📚 Moyenne</div>
+                <div class="card-value" id="moyenne">--</div>
+                <div class="card-subtitle">/20</div>
+            </div>
+            <div class="card" onclick="openModal('ai')">
+                <div class="card-label">🤖 Assistant IA</div>
+                <div class="card-value" style="font-size:40px;">💻</div>
+                <div class="card-subtitle">Perplexity</div>
+            </div>
+            <div class="card" style="grid-column: span 2;" onclick="openModal('notes')">
+                <div id="recent-notes" style="padding: 8px 0;">Chargement...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="vignette" onclick="openModal('news')">
+                <div class="vignette-icon">📰</div>
+                <div class="vignette-text">
+                    <div class="vignette-title">Actualités</div>
+                    <div class="vignette-count" id="news-count">Chargement...</div>
+                </div>
+            </div>
+            <div class="vignette" onclick="openModal('cinema')">
+                <div class="vignette-icon">🎬</div>
+                <div class="vignette-text">
+                    <div class="vignette-title">Cinéma</div>
+                    <div class="vignette-count">La Canne, Le Korrigan & La Bobine</div>
+                </div>
+            </div>
+            <div class="vignette" onclick="openModal('sms')">
+                <div class="vignette-icon">💬</div>
+                <div class="vignette-text">
+                    <div class="vignette-title">Messages</div>
+                    <div class="vignette-count" id="sms-count">Chargement...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+    <div class="modal" id="modal-calendar" onclick="closeModal('calendar')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">📅 Agenda du jour</div></div>
+            <div id="calendar-list" class="loading">Chargement...</div>
+        </div>
+    </div>
+    <div class="modal" id="modal-weather" onclick="closeModal('weather')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">🌤️ Prévisions 7 jours</div></div>
+            <div id="weather-week" class="loading">Chargement...</div>
+        </div>
+    </div>
+    <div class="modal" id="modal-news" onclick="closeModal('news')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">📰 Actualités</div></div>
+            <div id="news-list" class="loading">Chargement...</div>
+        </div>
+    </div>
+    <div class="modal" id="modal-cinema" onclick="closeModal('cinema')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">🎬 Programmation Cinéma</div></div>
+            <div id="cinema-list" class="loading">Chargement...</div>
+        </div>
+    </div>
+    <div class="modal" id="modal-moyenne" onclick="closeModal('moyenne')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">📊 Évolution Moyenne</div></div>
+            <div id="moyenne-content">
+                <div style="font-size:32px;text-align:center;margin:20px 0;">Moyenne: <span id="modal-moyenne-value">--</span>/20</div>
+                <div id="chart-container"><canvas id="moyenneChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="modal-notes" onclick="closeModal('notes')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">📝 Toutes les notes</div></div>
+            <div id="notes-list" class="loading">Chargement...</div>
+        </div>
+    </div>
+    <div class="modal" id="modal-ai" onclick="closeModal('ai')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header"><div class="modal-title">🤖 Assistant IA</div></div>
+            <div class="chat-container">
+                <div class="chat-header">
+                    <div></div>
+                    <button class="chat-clear" onclick="clearChat()">🗑️ Effacer</button>
+                </div>
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-container">
+                    <input type="text" class="chat-input" id="chat-input" placeholder="Posez votre question..." onkeypress="if(event.key==='Enter') sendMessage()">
+                    <button class="chat-send" onclick="sendMessage()">Envoyer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="modal-sms" onclick="event.stopPropagation()">
+        <div class="modal-content" onclick="event.stopPropagation()" style="max-width:100%;width:100%;max-height:100vh;height:100vh;margin:0;border-radius:0;display:flex;flex-direction:column;padding:0;overflow:hidden;">
+            <div class="modal-header" style="padding:15px 20px;border-bottom:1px solid rgba(74,158,255,0.2);flex-shrink:0;cursor:pointer;" onclick="closeModal('sms')">
+                <div class="modal-title">💬 Messages</div>
+            </div>
+            <div id="sms-list" style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0;"></div>
+        </div>
+    </div>
+
+    <script>
+        let data = { pronote: { notes_recentes: [], average: '--' }, weather: {}, news: [] };
+        let chart = null;
+        let smsRefreshInterval = null;
+        let lastSmsCount = 0;
+        let isTyping = false;
+        let userScrolledUp = false;
+        let notifiedSmsIds = new Set();
+        let notificationShown = false;
+        let lastAnimationSmsId = null;
+        let notificationsMuted = false;
+
+        async function init() {
+            updateDateTime();
+            setInterval(updateDateTime, 1000);
+            updateSunTimes();
+            await loadData();
+            setInterval(() => {
+                const now = new Date();
+                if (now.getHours() === 3 && now.getMinutes() === 0) {
+                    updateSunTimes(); loadData();
+                }
+            }, 60000);
+        }
+
+        function updateDateTime() {
+            const now = new Date();
+            const days = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+            const months = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+            document.getElementById('date').textContent = `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]}`;
+            document.getElementById('time').textContent = now.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+        }
+
+        async function updateSunTimes() {
+            try {
+                const r = await fetch('https://api.sunrise-sunset.org/json?lat=48.1373&lng=-1.9549&formatted=0');
+                const d = await r.json();
+                if (d.status === 'OK') {
+                    document.getElementById('sunrise').textContent = new Date(d.results.sunrise).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+                    document.getElementById('sunset').textContent = new Date(d.results.sunset).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+                }
+            } catch(e) {}
+        }
+
+        async function loadData() {
+            try {
+                const [pronoteRes, weather, news] = await Promise.all([
+                    fetch('/api/data').then(r => r.json()).catch(() => ({pronote: {}, loading: false})),
+                    fetch('/api/weather-free').then(r => r.json()).catch(() => ({})),
+                    fetch('/api/news-rss').then(r => r.json()).catch(() => [])
+                ]);
+                data = {
+                    pronote: pronoteRes.pronote || { notes_recentes: [], average: '--' },
+                    weather: weather || {},
+                    news: Array.isArray(news) ? news : []
+                };
+                updateUI();
+
+                // Si Pronote est en cours de scraping, reessayer toutes les 15s
+                if (pronoteRes.loading || !pronoteRes.pronote?.average || pronoteRes.pronote?.average === '0') {
+                    document.getElementById('moyenne').textContent = '⏳';
+                    document.getElementById('recent-notes').innerHTML = '<div style="opacity:0.6;font-size:12px;text-align:center;">⏳ Scraping Pronote en cours...<br>Prêt dans ~1-2 min</div>';
+                    setTimeout(loadData, 15000);
+                }
+            } catch(e) { console.error('Erreur:', e); }
+        }
+
+        function updateUI() {
+            document.getElementById('weather-icon').textContent = data.weather.icon || '🌤️';
+            const temp = (data.weather.temperature || '--').toString().replace('°C','');
+            document.getElementById('temperature').textContent = temp + '°';
+            document.getElementById('weather-condition').textContent = data.weather.condition || 'Chargement...';
+            document.getElementById('humidity').textContent = data.weather.humidity || '--';
+            document.getElementById('temp-feel').textContent = data.weather.feel || temp;
+            const wind = data.weather.wind_speed || '--';
+            document.getElementById('wind').textContent = wind.toString().replace('km/h','');
+            document.getElementById('moyenne').textContent = data.pronote.average || '--';
+            const notesContainer = document.getElementById('recent-notes');
+            if (data.pronote.notes_recentes && data.pronote.notes_recentes.length > 0) {
+                notesContainer.innerHTML = data.pronote.notes_recentes.slice(0,3).map(note => `
+                    <div class="note-item">
+                        <span class="note-matiere">${note.matiere}</span>
+                        <span class="note-value">${note.note_brute} (coef ${note.coefficient || 1})</span>
+                    </div>`).join('');
+            } else {
+                notesContainer.innerHTML = '<div style="opacity:0.6;font-size:12px;">Aucune note récente</div>';
+            }
+            document.getElementById('news-count').textContent = `${data.news.length} nouvelles`;
+        }
+
+        function openModal(type) {
+            document.getElementById(`modal-${type}`).classList.add('active');
+            if (type === 'sms' || type === 'ai') {
+                document.body.classList.add('sms-open');
+                if (type === 'sms') { userScrolledUp = false; loadSMS(); }
+            } else {
+                if (type === 'news') loadNews();
+                else if (type === 'cinema') loadCinema();
+                else if (type === 'moyenne') loadMoyenne();
+                else if (type === 'notes') loadAllNotes();
+                else if (type === 'weather') loadWeatherWeek();
+                else if (type === 'calendar') loadCalendar();
+            }
+        }
+
+        function closeModal(type) {
+            document.getElementById(`modal-${type}`).classList.remove('active');
+            if (type === 'sms' || type === 'ai') {
+                document.body.classList.remove('sms-open');
+                if (type === 'sms' && smsRefreshInterval) { clearInterval(smsRefreshInterval); smsRefreshInterval = null; userScrolledUp = false; }
+            }
+        }
+
+        async function loadCalendar() {
+            const container = document.getElementById('calendar-list');
+            container.innerHTML = '<div class="loading">Chargement...</div>';
+            try {
+                const response = await fetch('/api/calendar/events');
+                const d = await response.json();
+                if (d.error && d.manual_auth) {
+                    container.innerHTML = `<div class="calendar-auth">
+                        <h3 style="margin-bottom:20px;">🔒 Connexion Google Calendar</h3>
+                        <p style="margin-bottom:20px;opacity:0.8;">1. Copiez ce lien et ouvrez-le dans votre navigateur</p>
+                        <input type="text" id="auth-url" value="${d.auth_url}" readonly style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:white;font-size:11px;margin-bottom:15px;">
+                        <button onclick="copyAuthUrl()" class="calendar-auth-btn" style="margin-bottom:30px;">Copier le lien</button>
+                        <p style="margin-bottom:15px;opacity:0.8;">2. Autorisez l'accès et copiez le code</p>
+                        <input type="text" id="auth-code" placeholder="Collez le code ici" style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:white;font-size:14px;margin-bottom:15px;">
+                        <button onclick="submitAuthCode()" class="calendar-auth-btn">Valider</button></div>`;
+                    return;
+                }
+                const events = d.events || [];
+                if (!events.length) { container.innerHTML = '<div class="loading">Aucun événement aujourd\'hui</div>'; document.getElementById('calendar-count-header').textContent = 'Agenda'; return; }
+                document.getElementById('calendar-count-header').textContent = `${events.length} événement${events.length > 1 ? 's' : ''}`;
+                container.innerHTML = events.map(e => `
+                    <div class="calendar-event" data-event-id="${e.id}">
+                        <div class="calendar-time">${e.start}${e.end ? ' - ' + e.end : ''}</div>
+                        <div class="calendar-title">${e.title}</div>
+                        ${e.location ? `<div class="calendar-location">📍 ${e.location}</div>` : ''}
+                        ${e.id ? `<button onclick="deleteCalendarItem('${e.id}','${e.type}','${e.tasklist_id||''}',this)" style="margin-top:10px;background:#dc3545;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">🗑️ Supprimer</button>` : ''}
+                    </div>`).join('');
+            } catch(e) { container.innerHTML = '<div class="loading">Erreur de chargement</div>'; }
+        }
+
+        async function submitAuthCode() {
+            const code = document.getElementById('auth-code').value.trim();
+            if (!code) return;
+            const r = await fetch('/api/calendar/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({code}) });
+            const result = await r.json();
+            if (result.success) { alert('✅ Authentification réussie !'); loadCalendar(); } else { alert('❌ Code invalide'); }
+        }
+
+        function copyAuthUrl() { const i = document.getElementById('auth-url'); i.select(); document.execCommand('copy'); alert('✅ Lien copié !'); }
+
+        async function loadWeatherWeek() {
+            const container = document.getElementById('weather-week');
+            container.innerHTML = '<div class="loading">Chargement...</div>';
+            try {
+                const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=48.1373&longitude=-1.9549&daily=temperature_2m_max,temperature_2m_min,weathercode,precipitation_probability_max,windspeed_10m_max&timezone=Europe/Paris&forecast_days=7');
+                const d = await r.json();
+                const weatherCodes = {0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'🌨️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️'};
+                const days = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+                container.innerHTML = d.daily.time.map((t, i) => {
+                    const date = new Date(t);
+                    const dayName = i===0?"Aujourd'hui":i===1?"Demain":days[date.getDay()];
+                    return `<div class="weather-day">
+                        <div class="weather-day-header"><div class="weather-day-name">${dayName}</div><div class="weather-day-icon">${weatherCodes[d.daily.weathercode[i]]||'🌤️'}</div></div>
+                        <div class="weather-day-temp">${Math.round(d.daily.temperature_2m_min[i])}° - ${Math.round(d.daily.temperature_2m_max[i])}°</div>
+                        <div class="weather-day-details"><div class="weather-detail-item">💧 Pluie: ${Math.round(d.daily.precipitation_probability_max[i])}%</div><div class="weather-detail-item">💨 Vent: ${Math.round(d.daily.windspeed_10m_max[i])} km/h</div></div>
+                    </div>`;
+                }).join('');
+            } catch(e) { container.innerHTML = '<div class="loading">Erreur</div>'; }
+        }
+
+        async function loadNews() {
+            const container = document.getElementById('news-list');
+            if (!data?.news?.length) { container.innerHTML = '<div class="loading">Aucune actualité</div>'; return; }
+            container.innerHTML = data.news.map(n => `
+                <div class="news-item" onclick="toggleNewsFullscreen(this)">
+                    <div class="news-title">${n.title}</div>
+                    <div class="news-summary">${n.summary || 'Cliquez pour lire'}</div>
+                </div>`).join('');
+        }
+
+        function toggleNewsFullscreen(el) {
+            if (el.classList.contains('fullscreen')) { el.classList.remove('fullscreen'); document.body.classList.remove('modal-open'); }
+            else { document.querySelectorAll('.news-item.fullscreen').forEach(e => e.classList.remove('fullscreen')); el.classList.add('fullscreen'); document.body.classList.add('modal-open'); }
+        }
+
+        async function loadCinema() {
+            const container = document.getElementById('cinema-list');
+            container.innerHTML = '<div class="loading">Chargement...</div>';
+            try {
+                const r = await fetch('/api/cinema/programmation');
+                const cinemas = await r.json();
+                if (!cinemas.length) { container.innerHTML = '<div class="loading">Données cinéma indisponibles</div>'; return; }
+                const allMovies = {};
+                for (const cinema of cinemas) {
+                    for (const jour of cinema.semaine || []) {
+                        for (const film of jour.films || []) {
+                            if (!allMovies[film.titre]) allMovies[film.titre] = {...film, projections: []};
+                            allMovies[film.titre].projections.push({cinema: cinema.cinema, jour: jour.jour, date_iso: jour.date_iso, horaires: film.horaires});
+                        }
+                    }
+                }
+                container.innerHTML = Object.entries(allMovies).map(([titre, film]) => {
+                    const te = titre.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+                    const pj = JSON.stringify(film.projections).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+                    return `<div class="movie-item" onclick="toggleMovieFullscreen(this)">
+                        <img src="${film.image||''}" alt="${te}" class="movie-poster" onerror="this.style.display='none'">
+                        <div class="movie-info">
+                            <div class="movie-title">${titre}</div>
+                            <div class="movie-synopsis">${film.synopsis||'Synopsis non disponible'}</div>
+                            <div class="movie-showtimes">${film.projections.map(p=>`<span class="showtime">${p.cinema} - ${p.jour} ${p.horaires.join(', ')}</span>`).join('')}</div>
+                            <button onclick="event.stopPropagation();showMovieCalendarModal('${te}','${pj}','${film.duree_minutes||150}')" style="width:100%;background:#28a745;color:#fff;border:none;padding:8px;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;margin-top:8px;">➕ Ajouter à l'agenda</button>
+                        </div></div>`;
+                }).join('');
+            } catch(e) { container.innerHTML = '<div class="loading">Erreur</div>'; }
+        }
+
+        async function checkNewSMS() {
+            if (document.getElementById('modal-sms').classList.contains('active')) { notificationShown = false; return; }
+            try {
+                const r = await fetch('/api/sms/wife');
+                const sms = await r.json();
+                const unread = sms.filter(m => m.sender.includes('Femme') && !m.read);
+                unread.sort((a,b) => { const [ah,am]=a.time.split(':').map(Number); const [bh,bm]=b.time.split(':').map(Number); return (ah*60+am)-(bh*60+bm); });
+                for (const msg of unread) {
+                    const id = msg.time + msg.message;
+                    if (!notifiedSmsIds.has(id)) {
+                        notifiedSmsIds.add(id);
+                        await new Promise(r => setTimeout(r, 500));
+                        showSmsNotification(msg);
+                        if (lastAnimationSmsId !== id) {
+                            if (/je\s*t[''`]?\s*aime|jtm/i.test(msg.message)) { lastAnimationSmsId = id; setTimeout(triggerLoveAnimation, 500); }
+                            else if (/caca|popo|💩/i.test(msg.message)) { lastAnimationSmsId = id; setTimeout(triggerPoopAnimation, 500); }
+                        }
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+            } catch(e) {}
+        }
+
+        function showSmsNotification(sms) {
+            if (!notificationsMuted) soundSystem.playNotification();
+            const existing = document.querySelector('.sms-notification');
+            if (existing) existing.remove();
+            const notif = document.createElement('div');
+            notif.className = 'sms-notification';
+            notif.innerHTML = `<div class="sms-notification-header">💌 Ma chérie ❤️</div><div class="sms-notification-body">${sms.message.substring(0,80)}${sms.message.length>80?'...':''}</div>`;
+            let startX=0, currentX=0, moved=false;
+            const dismiss = () => { notif.style.transition='all 0.3s ease'; notif.style.transform='translate(400px,0)'; notif.style.opacity='0'; notificationShown=false; setTimeout(()=>{ if(document.body.contains(notif)) document.body.removeChild(notif); }, 300); };
+            notif.addEventListener('click', () => { notificationShown=false; if(document.body.contains(notif)) document.body.removeChild(notif); openModal('sms'); });
+            document.body.appendChild(notif);
+            setTimeout(() => { if(document.body.contains(notif)) dismiss(); }, 6000);
+        }
+
+        async function loadSMS(silent=false) {
+            const container = document.getElementById('sms-list');
+            if (!silent) container.innerHTML = '<div class="loading">Chargement...</div>';
+            try {
+                const r = await fetch('/api/sms/wife');
+                const sms = await r.json();
+                const newHash = JSON.stringify(sms.map(m=>m.time+m.message));
+                if (silent && window.lastSmsHash === newHash) return;
+                window.lastSmsHash = newHash;
+                lastSmsCount = sms.length;
+                await fetch('/api/sms/mark-read', {method:'POST'});
+                const unread = sms.filter(m=>!m.read).length;
+                document.getElementById('sms-count').textContent = unread > 0 ? `${unread} nouveau${unread>1?'x':''}` : `${sms.length} message${sms.length>1?'s':''}`;
+                const oldInput = document.getElementById('reply-input');
+                const savedText = oldInput ? oldInput.value : '';
+                const last5 = [...sms].reverse().slice(-5);
+                let html = `<div id="chat-messages" style="flex:1;overflow-y:auto;padding:15px;-webkit-overflow-scrolling:touch;">`;
+                if (!sms.length) { html += '<div style="text-align:center;opacity:0.6;margin-top:50px;">Aucun message</div>'; }
+                else {
+                    for (const msg of last5) {
+                        const isWife = msg.sender.includes('Femme') || msg.sender.includes('💕');
+                        html += `<div style="display:flex;justify-content:${isWife?'flex-start':'flex-end'};margin-bottom:10px;">
+                            <div style="max-width:75%;background:${isWife?'#007AFF':'rgba(255,255,255,0.15)'};color:#fff;padding:10px 14px;border-radius:${isWife?'18px 18px 18px 4px':'18px 18px 4px 18px'};">
+                                <div style="font-size:15px;line-height:1.4;word-wrap:break-word;">${msg.message}</div>
+                                <div style="font-size:11px;opacity:0.7;margin-top:4px;">${msg.time}</div>
+                            </div></div>`;
+                    }
+                }
+                html += `</div><div style="padding:12px;background:rgba(30,35,50,0.8);border-top:1px solid rgba(74,158,255,0.2);flex-shrink:0;" onclick="event.stopPropagation()">
+                    <div style="display:flex;gap:8px;align-items:flex-end;">
+                        <button onclick="clearAllMessages()" style="width:36px;height:36px;background:rgba(220,53,69,0.6);color:#fff;border:none;border-radius:50%;font-size:16px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">🗑️</button>
+                        <textarea id="reply-input" placeholder="Message" onclick="event.stopPropagation()" style="flex:1;padding:10px 12px;border-radius:20px;border:1px solid rgba(74,158,255,0.3);background:rgba(255,255,255,0.1);color:#fff;font-size:15px;resize:none;max-height:100px;font-family:inherit;" rows="1"></textarea>
+                        <button onclick="sendReply()" style="width:36px;height:36px;background:#007AFF;color:#fff;border:none;border-radius:50%;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;touch-action:manipulation;">↑</button>
+                    </div></div>`;
+                requestAnimationFrame(() => {
+                    container.innerHTML = html;
+                    const ta = document.getElementById('reply-input');
+                    if (ta) {
+                        if (savedText) { ta.value = savedText; ta.style.height = Math.min(ta.scrollHeight,100)+'px'; }
+                        ta.addEventListener('input', function() { this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,100)+'px'; isTyping=this.value.trim().length>0; });
+                        ta.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendReply();} });
+                        ['click','touchstart','touchmove','touchend'].forEach(ev => ta.addEventListener(ev, e => e.stopPropagation(), {passive:false}));
+                    }
+                    const cm = document.getElementById('chat-messages');
+                    if (cm) { cm.addEventListener('scroll', () => { userScrolledUp = !(cm.scrollHeight-cm.scrollTop <= cm.clientHeight+100); }); if (!userScrolledUp || !silent) setTimeout(()=>cm.scrollTop=cm.scrollHeight,0); }
+                });
+                if (!smsRefreshInterval) { smsRefreshInterval = setInterval(() => { if(document.getElementById('modal-sms').classList.contains('active')) loadSMS(true); }, 10000); }
+            } catch(e) { if (!silent) { container.innerHTML='<div class="loading">Erreur</div>'; document.getElementById('sms-count').textContent='Erreur'; } }
+        }
+
+        async function sendReply() {
+            const input = document.getElementById('reply-input');
+            const message = input.value.trim();
+            if (!message) return;
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+            const cm = document.getElementById('chat-messages');
+            cm.insertAdjacentHTML('beforeend', `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" id="temp-msg"><div style="max-width:75%;background:rgba(255,255,255,0.15);color:#e8eaf0;padding:10px 14px;border-radius:18px 18px 4px 18px;opacity:0.7;"><div style="font-size:15px;line-height:1.4;">${message}</div><div style="font-size:11px;opacity:0.7;margin-top:4px;">${timeStr} ⏳</div></div></div>`);
+            cm.scrollTop = cm.scrollHeight;
+            const copy = message; input.value = ''; input.style.height = 'auto';
+            try {
+                const r = await fetch('/api/sms/receive', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sender:'Toi',message:copy})});
+                if (r.ok) { document.getElementById('temp-msg')?.remove(); await loadSMS(false); setTimeout(()=>{const ni=document.getElementById('reply-input');if(ni)ni.focus();},100); }
+                else { document.getElementById('temp-msg')?.remove(); input.value = copy; alert('❌ Erreur d\'envoi'); }
+            } catch(e) { document.getElementById('temp-msg')?.remove(); input.value = copy; alert('❌ Erreur'); }
+        }
+
+        async function clearAllMessages() {
+            if (!confirm('🗑️ Supprimer toute la conversation ?')) return;
+            const r = await fetch('/api/sms/clear', {method:'POST'});
+            const res = await r.json();
+            if (res.success) { await loadSMS(false); } else { alert('❌ Erreur'); }
+        }
+
+        function loadMoyenne() {
+            if (!data?.pronote) { document.getElementById('modal-moyenne-value').textContent = 'Données non chargées'; return; }
+            const v = parseFloat(data.pronote.average) || 0;
+            document.getElementById('modal-moyenne-value').textContent = v.toFixed(2);
+            if (!data?.pronote?.notes_recentes?.length) return;
+            const notes = [...data.pronote.notes_recentes].reverse();
+            const moyennes = [];
+            for (let i = 0; i < notes.length; i++) {
+                const subset = notes.slice(0, i+1);
+                const matieres = {};
+                subset.forEach(n => {
+                    const mat = n.matiere.split('>')[0].trim();
+                    const val = parseFloat((n.note_brute||'').split('/')[0]);
+                    const coef = parseFloat(n.coefficient||1);
+                    if (!isNaN(val) && !isNaN(coef)) {
+                        if (!matieres[mat]) matieres[mat] = {pts:0,coef:0};
+                        matieres[mat].pts += val*coef; matieres[mat].coef += coef;
+                    }
+                });
+                let tg=0,tc=0;
+                for (const m of Object.values(matieres)) { if(m.coef>0){tg+=m.pts/m.coef*m.coef;tc+=m.coef;} }
+                if (tc>0) moyennes.push(parseFloat((tg/tc).toFixed(2)));
+            }
+            if (chart) chart.destroy();
+            chart = new Chart(document.getElementById('moyenneChart').getContext('2d'), {
+                type:'line', data:{labels:notes.map((_,i)=>`Note ${i+1}`),datasets:[{label:'Moyenne',data:moyennes,borderColor:'rgba(255,255,255,0.8)',backgroundColor:'rgba(255,255,255,0.1)',tension:0.4,fill:true,pointRadius:4}]},
+                options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'white'}},tooltip:{callbacks:{label:c=>'Moyenne: '+c.parsed.y.toFixed(2)+'/20'}}},scales:{y:{beginAtZero:true,max:20,ticks:{color:'white'},grid:{color:'rgba(255,255,255,0.1)'}},x:{ticks:{color:'white'},grid:{color:'rgba(255,255,255,0.1)'}}}}
+            });
+        }
+
+        function loadAllNotes() {
+            const container = document.getElementById('notes-list');
+            if (!data?.pronote?.notes_recentes?.length) { container.innerHTML = '<div class="loading">Aucune note</div>'; return; }
+            container.innerHTML = data.pronote.notes_recentes.map(n => `
+                <div class="note-item">
+                    <span class="note-matiere">${n.matiere}</span>
+                    <span class="note-value">${n.note_brute} (coef ${n.coefficient||1})</span>
+                </div>`).join('');
+        }
+
+        function toggleMovieFullscreen(el) {
+            if (el.classList.contains('fullscreen')) { el.classList.remove('fullscreen'); document.body.classList.remove('modal-open'); }
+            else { document.querySelectorAll('.movie-item.fullscreen').forEach(e=>e.classList.remove('fullscreen')); el.classList.add('fullscreen'); document.body.classList.add('modal-open'); }
+        }
+
+        function toggleFullscreen(el) {
+            if (el.classList.contains('fullscreen')) { el.classList.remove('fullscreen'); document.body.classList.remove('modal-open'); }
+            else { document.querySelectorAll('.chat-message.fullscreen').forEach(e=>e.classList.remove('fullscreen')); el.classList.add('fullscreen'); document.body.classList.add('modal-open'); }
+        }
+
+        function toggleNotificationSound() {
+            notificationsMuted = !notificationsMuted;
+            document.getElementById('sound-toggle-icon').textContent = notificationsMuted ? '🔇' : '🔔';
+            document.getElementById('sound-toggle-btn').style.opacity = notificationsMuted ? '0.5' : '1';
+            localStorage.setItem('notificationsMuted', notificationsMuted);
+        }
+
+        function clearChat() { document.getElementById('chat-messages').innerHTML = ''; }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const q = input.value.trim();
+            if (!q) return;
+            const mc = document.getElementById('chat-messages');
+            mc.innerHTML += `<div class="chat-message user"><div class="chat-label">Vous</div><div class="chat-text">${q}</div></div>`;
+            input.value = '';
+            mc.innerHTML += `<div class="chat-message ai" onclick="toggleFullscreen(this)"><div class="chat-label">IA</div><div class="chat-text">Réflexion...</div></div>`;
+            mc.scrollTop = mc.scrollHeight;
+            try {
+                const r = await fetch(`/api/ai-chat?q=${encodeURIComponent(q)}`);
+                const res = await r.json();
+                const msgs = mc.querySelectorAll('.chat-message.ai');
+                msgs[msgs.length-1].querySelector('.chat-text').textContent = res.answer || 'Désolé.';
+            } catch(e) { const msgs=mc.querySelectorAll('.chat-message.ai'); msgs[msgs.length-1].querySelector('.chat-text').textContent='Erreur'; }
+            mc.scrollTop = mc.scrollHeight;
+        }
+
+        async function deleteCalendarItem(id, type, tasklistId, btn) {
+            if (!confirm(`Supprimer cet événement ?`)) return;
+            btn.disabled = true; btn.textContent = '...';
+            try {
+                const r = await fetch(`/api/calendar/event/${id}`, {method:'DELETE'});
+                const res = await r.json();
+                if (res.success) { btn.closest('.calendar-event').style.opacity='0'; setTimeout(()=>loadCalendar(),300); }
+                else { alert('❌ '+res.message); btn.disabled=false; btn.textContent='🗑️ Supprimer'; }
+            } catch(e) { alert('❌ Erreur'); btn.disabled=false; btn.textContent='🗑️ Supprimer'; }
+        }
+
+        document.addEventListener('keydown', e => { if(e.key==='Escape') document.querySelectorAll('.modal').forEach(m=>m.classList.remove('active')); });
+
+        // Animations
+        function triggerLoveAnimation() {
+            const c = document.createElement('div');
+            c.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;overflow:hidden;';
+            document.body.appendChild(c);
+            if (!document.getElementById('love-anim')) {
+                const s = document.createElement('style'); s.id='love-anim';
+                s.textContent = `@keyframes heartFall{0%{transform:translateY(0) translateX(0) rotate(0deg) scale(0);opacity:0}10%{opacity:1;transform:translateY(10vh) translateX(var(--drift)) rotate(180deg) scale(1)}90%{opacity:1}100%{transform:translateY(110vh) translateX(calc(var(--drift)*2)) rotate(720deg) scale(0.5);opacity:0}}`;
+                document.head.appendChild(s);
+            }
+            for(let i=0;i<30;i++){setTimeout(()=>{const h=document.createElement('div');const hearts=['💕','💖','💗','💓','💝','❤️'];h.textContent=hearts[Math.floor(Math.random()*hearts.length)];const d=(Math.random()-.5)*100;h.style.cssText=`position:absolute;left:${Math.random()*100}%;top:-50px;font-size:${20+Math.random()*30}px;animation:heartFall ${3+Math.random()*2}s ease-in ${Math.random()*.5}s forwards;opacity:0;`;h.style.setProperty('--drift',`${d}px`);c.appendChild(h);},i*100);}
+            setTimeout(()=>c.remove(),6000);
+        }
+
+        function triggerPoopAnimation() {
+            const c = document.createElement('div');
+            c.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;overflow:hidden;';
+            document.body.appendChild(c);
+            if (!document.getElementById('poop-anim')) {
+                const s = document.createElement('style'); s.id='poop-anim';
+                s.textContent = `@keyframes poopFall{0%{transform:translateY(0) translateX(0) rotate(0deg) scale(0);opacity:0}10%{opacity:1;transform:translateY(10vh) translateX(var(--drift)) rotate(180deg) scale(1)}90%{opacity:1}100%{transform:translateY(110vh) translateX(calc(var(--drift)*2)) rotate(720deg) scale(0.5);opacity:0}}`;
+                document.head.appendChild(s);
+            }
+            for(let i=0;i<25;i++){setTimeout(()=>{const p=document.createElement('div');p.textContent=['💩','🚽','🧱'][Math.floor(Math.random()*3)];const d=(Math.random()-.5)*100;p.style.cssText=`position:absolute;left:${Math.random()*100}%;top:-50px;font-size:${20+Math.random()*30}px;animation:poopFall ${3+Math.random()*2}s ease-in ${Math.random()*.5}s forwards;opacity:0;`;p.style.setProperty('--drift',`${d}px`);c.appendChild(p);},i*100);}
+            setTimeout(()=>c.remove(),6000);
+        }
+
+        function showUrgentAlert(sender) {
+            const overlay = document.createElement('div');
+            overlay.id = 'urgent-alert-overlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(220,53,69,0.95);z-index:999999;display:flex;flex-direction:column;justify-content:center;align-items:center;';
+            overlay.innerHTML = `<div style="font-size:80px;margin-bottom:30px;">🚨</div><div style="font-size:48px;font-weight:bold;color:white;text-align:center;margin-bottom:20px;">${sender} t'appelle !</div><div style="font-size:24px;color:white;opacity:0.9;margin-bottom:40px;">Descends vite !</div><button onclick="dismissAlert()" style="background:white;color:#dc3545;border:none;padding:20px 40px;border-radius:50px;font-size:24px;font-weight:bold;cursor:pointer;">✅ J'arrive !</button>`;
+            document.body.appendChild(overlay);
+        }
+
+        function dismissAlert() {
+            const o = document.getElementById('urgent-alert-overlay');
+            if (o) { o.style.opacity='0'; o.style.transition='opacity 0.3s'; setTimeout(()=>o.remove(),300); }
+        }
+
+        // Init
+        init();
+        setInterval(checkNewSMS, 5000);
+
+        const saved = localStorage.getItem('notificationsMuted');
+        if (saved === 'true') { notificationsMuted = true; setTimeout(()=>{ document.getElementById('sound-toggle-icon').textContent='🔇'; document.getElementById('sound-toggle-btn').style.opacity='0.5'; },100); }
+        document.body.addEventListener('click', ()=>soundSystem.init(), {once:true});
+        document.body.addEventListener('touchstart', ()=>soundSystem.init(), {once:true,passive:true});
+    </script>
+</body>
+</html>
