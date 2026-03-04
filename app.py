@@ -99,7 +99,7 @@ def scrape_pronote():
             page.fill('#password', PRONOTE_PASS)
             page.click('#bouton_valider')
             page.wait_for_timeout(5000)
-            page.wait_for_selector('[data-dnma-outil="PRONOTE"]', timeout=20000)
+            page.wait_for_selector('[data-dnma-outil="PRONOTE"]', timeout=60000)
 
             # Ouvrir Pronote
             pronote_link = page.locator('[data-dnma-outil="PRONOTE"]')
