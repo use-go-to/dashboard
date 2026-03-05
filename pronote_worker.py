@@ -76,18 +76,37 @@ def scrape():
             print(f'STEP3_URL: {page.url}', flush=True)
             print(f'STEP3_TITLE: {page.title()}', flush=True)
 
-            # Etape 3b : page de confirmation SAML ("Confirmation de l'identité")
-            # EduConnect affiche une page intermédiaire avec #bouton_valider à cliquer
+            # Etape 3b : page de confirmation SAML
             if 'educonnect' in page.url.lower():
-                print(f'CONFIRM_PAGE: {page.title()} - {page.url}', flush=True)
-                try:
-                    page.wait_for_selector('#bouton_valider', timeout=5000)
-                    page.click('#bouton_valider')
-                    print('CONFIRM_CLICKED: #bouton_valider', flush=True)
-                    page.wait_for_timeout(6000)
-                    print(f'AFTER_CONFIRM_URL: {page.url}', flush=True)
-                except Exception as e:
-                    print(f'CONFIRM_ERROR: {e}', flush=True)
+                print(f'CONFIRM_PAGE: {page.title()}', flush=True)
+                # Dump HTML body complet pour voir les boutons disponibles
+                body_html = page.inner_html('body')
+                # Chercher tous les boutons/inputs submit
+                import re as _re
+                btns = _re.findall(r'<(?:button|input)[^>]*>', body_html)
+                print(f'CONFIRM_BUTTONS_HTML: {btns}', flush=True)
+                # Essayer tous les boutons submit possibles
+                clicked = False
+                for sel in ['button[type="submit"]', 'input[type="submit"]',
+                            'button[name="_eventId_proceed"]', 'button[name*="proceed"]',
+                            'button[name*="submit"]', '.fr-btn', 'button']:
+                    try:
+                        els = page.locator(sel).all()
+                        for el in els:
+                            if el.is_visible(timeout=500):
+                                txt = el.text_content() or ''
+                                print(f'CONFIRM_TRY_CLICK: {sel} text="{txt.strip()}"', flush=True)
+                                el.click()
+                                page.wait_for_timeout(6000)
+                                print(f'AFTER_CONFIRM_URL: {page.url}', flush=True)
+                                clicked = True
+                                break
+                    except:
+                        pass
+                    if clicked:
+                        break
+                if not clicked:
+                    print('CONFIRM_NO_BUTTON_FOUND', flush=True)
 
             # Vérification finale
             if 'educonnect' in page.url.lower():
