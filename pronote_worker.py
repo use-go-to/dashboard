@@ -52,7 +52,7 @@ def scrape():
             print(f'PAGE_URL_BEFORE_LOGIN: {page.url}', flush=True)
 
             # Vider et remplir username via triple_click + type (simule clavier réel)
-            page.triple_click('#username')
+            page.click('#username', click_count=3)
             page.wait_for_timeout(300)
             page.keyboard.type(PRONOTE_USER, delay=80)
             val_u = page.input_value('#username')
@@ -63,7 +63,7 @@ def scrape():
             page.wait_for_timeout(500)
 
             # Vider et remplir password
-            page.triple_click('#password')
+            page.click('#password', click_count=3)
             page.wait_for_timeout(300)
             page.keyboard.type(PRONOTE_PASS, delay=80)
             val_p = page.input_value('#password')
