@@ -62,22 +62,37 @@ def get_weather_desc(code):
 
 def scrape_pronote():
     """Lance pronote_worker.py en subprocess pour éviter le conflit asyncio/gevent"""
-    import subprocess, sys
+    import subprocess, sys, os
+    # Trouver le chemin absolu du worker
+    worker_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pronote_worker.py')
+    print(f'WORKER_PATH: {worker_path} exists={os.path.exists(worker_path)}', flush=True)
     try:
         result = subprocess.run(
-            [sys.executable, 'pronote_worker.py'],
+            [sys.executable, worker_path],
             capture_output=True, text=True, timeout=180,
-            env={**__import__('os').environ}
+            env={**os.environ},
+            cwd=os.path.dirname(worker_path)
         )
-        # Les prints du worker vont dans stderr (visible dans logs Render)
-        if result.stderr:
-            print(result.stderr, flush=True)
+        # Afficher stdout ET stderr dans les logs Render
         if result.stdout:
-            # Dernière ligne = JSON result
-            lines = [l for l in result.stdout.strip().split('\n') if l]
-            json_line = lines[-1] if lines else '{}'
-            return json.loads(json_line)
-        return {'notes_recentes': [], 'average': '0', 'error': 'Pas de sortie du worker'}
+            for line in result.stdout.strip().split('\n'):
+                print(f'[worker] {line}', flush=True)
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                print(f'[worker_err] {line}', flush=True)
+        # Dernière ligne de stdout = JSON result
+        if result.stdout:
+            lines = [l for l in result.stdout.strip().split('\n') if l.startswith('{')]
+            if lines:
+                return json.loads(lines[-1])
+            # Fallback: dernière ligne
+            all_lines = [l for l in result.stdout.strip().split('\n') if l]
+            if all_lines:
+                try:
+                    return json.loads(all_lines[-1])
+                except:
+                    pass
+        return {'notes_recentes': [], 'average': '0', 'error': f'Pas de JSON. stdout={result.stdout[-200:] if result.stdout else ""} stderr={result.stderr[-200:] if result.stderr else ""}'}
     except subprocess.TimeoutExpired:
         return {'notes_recentes': [], 'average': '0', 'error': 'Timeout 180s'}
     except Exception as e:
