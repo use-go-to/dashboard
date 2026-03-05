@@ -61,340 +61,37 @@ def get_weather_desc(code):
 # ─── PRONOTE SCRAPER ───────────────────────────────────────────────────────────
 
 def scrape_pronote():
+    """Lance pronote_worker.py en subprocess pour éviter le conflit asyncio/gevent"""
+    import subprocess, sys
     try:
-        from playwright.sync_api import sync_playwright
-        import re, base64
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox','--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage','--disable-gpu',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-infobars',
-                    '--window-size=1280,900',
-                ]
-            )
-            ctx = browser.new_context(
-                viewport={'width':1280,'height':900},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                locale='fr-FR',
-                timezone_id='Europe/Paris',
-                extra_http_headers={
-                    'Accept-Language': 'fr-FR,fr;q=0.9',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                }
-            )
-            # Masquer les traces d'automatisation
-            ctx.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR','fr']});
-                window.chrome = {runtime: {}};
-            """)
-            page = ctx.new_page()
-
-            # ETAPE 1 - Toutatice
-            print('📍 Etape 1: Chargement Toutatice...')
-            page.goto('https://www.toutatice.fr/', wait_until='domcontentloaded', timeout=30000)
-            page.wait_for_timeout(3000)
-            print(f'   URL: {page.url}')
-            print(f'   Titre: {page.title()}')
-
-            # Chercher bouton connexion avec plusieurs sélecteurs
-            login_selectors = ['a.btn-login', 'a[href*="login"]', 'a[href*="connexion"]', 
-                               'button:has-text("Connexion")', 'a:has-text("Connexion")',
-                               'a:has-text("Se connecter")', '.login-btn', '#login']
-            login_clicked = False
-            for sel in login_selectors:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        print(f'   ✅ Bouton login trouvé: {sel}')
-                        el.click()
-                        login_clicked = True
-                        break
-                except:
-                    pass
-            
-            if not login_clicked:
-                # Dump du HTML pour debug
-                html_preview = page.inner_html('body')[:500]
-                print(f'   ❌ Bouton login introuvable. HTML: {html_preview}')
-                browser.close()
-                return {'notes_recentes': [], 'average': '0', 
-                        'error': f'Bouton login Toutatice introuvable. URL={page.url}'}
-
-            page.wait_for_load_state('domcontentloaded')
-            page.wait_for_timeout(3000)
-            print(f'   Après login click - URL: {page.url}')
-
-            # ETAPE 2 - Choix EduConnect
-            print('📍 Etape 2: Sélection EduConnect...')
-            educonnect_selectors = [
-                'button.card-button', 
-                'button:has-text("ÉduConnect")',
-                'button:has-text("EduConnect")',
-                'button:has-text("Élève")',
-                '[data-provider="educonnect"]',
-                '.provider-educonnect',
-                'button[title*="EduConnect"]',
-            ]
-            edu_clicked = False
-            for sel in educonnect_selectors:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        print(f'   ✅ Bouton EduConnect trouvé: {sel}')
-                        el.click()
-                        edu_clicked = True
-                        break
-                except:
-                    pass
-
-            if not edu_clicked:
-                # Peut-être qu'on est déjà sur la page de login
-                print('   ⚠️ EduConnect non trouvé, on continue...')
-
-            page.wait_for_timeout(4000)
-            print(f'   URL: {page.url}')
-
-            # ETAPE 3 - Login EduConnect (formulaire en 2 étapes)
-            print('📍 Etape 3: Saisie identifiants EduConnect...')
-            page.wait_for_timeout(3000)
-            print(f'   URL formulaire: {page.url}')
-
-            # Etape 3a : saisir le username
-            try:
-                page.wait_for_selector('input', timeout=10000)
-                # Dump tous les inputs pour debug
-                inputs = page.eval_on_selector_all('input', 'els => els.map(e => ({id:e.id, name:e.name, type:e.type, placeholder:e.placeholder}))')
-                print(f'   Inputs trouvés: {inputs}')
-                
-                username_field = None
-                for sel in ['#username', 'input[name="username"]', '#j_username', 
-                            'input[name="j_username"]', 'input[type="text"]',
-                            'input[autocomplete="username"]']:
-                    try:
-                        el = page.locator(sel).first
-                        if el.is_visible(timeout=1000):
-                            username_field = el
-                            print(f'   ✅ Username field: {sel}')
-                            break
-                    except:
-                        pass
-                
-                if username_field:
-                    username_field.click()
-                    page.wait_for_timeout(500)
-                    username_field.fill('')
-                    username_field.type(PRONOTE_USER, delay=50)
-                    print(f'   ✅ Username saisi: {PRONOTE_USER}')
-                else:
-                    print(f'   ❌ Aucun champ username. Page HTML:')
-                    print(page.inner_html('body')[:600])
-            except Exception as e:
-                print(f'   ❌ Erreur username: {e}')
-                print(f'   HTML: {page.inner_html("body")[:600]}')
-
-            # Chercher si password est déjà visible ou s'il faut valider d'abord
-            password_visible = False
-            try:
-                pwd = page.locator('#password, input[type="password"]').first
-                password_visible = pwd.is_visible(timeout=2000)
-            except:
-                pass
-
-            if not password_visible:
-                # Cliquer sur "Suivant" / "Continuer" pour afficher le champ password
-                print('   ⏩ Password non visible, clic sur Suivant...')
-                next_selectors = [
-                    '#bouton_valider',
-                    'button[type="submit"]',
-                    'input[type="submit"]',
-                    'button:has-text("Suivant")',
-                    'button:has-text("Continuer")',
-                    'button:has-text("Connexion")',
-                ]
-                for sel in next_selectors:
-                    try:
-                        el = page.locator(sel).first
-                        if el.is_visible(timeout=2000):
-                            print(f'   ✅ Bouton suivant: {sel}')
-                            el.click()
-                            break
-                    except:
-                        pass
-                page.wait_for_timeout(4000)
-                print(f'   URL après suivant: {page.url}')
-
-            # Etape 3b : saisir le password
-            try:
-                page.wait_for_selector('#password, input[type="password"], input[name="password"]', timeout=10000)
-                pwd_field = page.locator('#password, input[type="password"]').first
-                pwd_field.fill(PRONOTE_PASS)
-                print('   ✅ Password saisi')
-            except Exception as e:
-                print(f'   ❌ Champ password introuvable: {e}')
-
-            # Valider le formulaire
-            for sel in ['#bouton_valider', 'button[type="submit"]', 'input[type="submit"]',
-                        'button:has-text("Connexion")', 'button:has-text("Se connecter")']:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        print(f'   ✅ Submit final: {sel}')
-                        el.click()
-                        break
-                except:
-                    pass
-
-            page.wait_for_timeout(8000)
-            print(f'   URL après login: {page.url}')
-            print(f'   Titre: {page.title()}')
-
-            # ETAPE 4 - Trouver Pronote
-            print('📍 Etape 4: Recherche tuile Pronote...')
-            pronote_selectors = [
-                '[data-dnma-outil="PRONOTE"]',
-                'a[href*="pronote"]',
-                'a[title*="Pronote"]',
-                'a[title*="PRONOTE"]',
-                'img[alt*="Pronote"]',
-                '.application-pronote',
-                'a:has-text("Pronote")',
-                'a:has-text("PRONOTE")',
-                '[class*="pronote"]',
-                '[id*="pronote"]',
-            ]
-            pronote_found = False
-            for sel in pronote_selectors:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=3000):
-                        print(f'   ✅ Pronote trouvé: {sel}')
-                        try:
-                            with ctx.expect_page(timeout=8000) as new_page_info:
-                                el.click()
-                            pronote_page = new_page_info.value
-                        except:
-                            el.click()
-                            page.wait_for_timeout(3000)
-                            pronote_page = page
-                        pronote_found = True
-                        break
-                except:
-                    pass
-
-            if not pronote_found:
-                # Dump liens disponibles
-                links = page.eval_on_selector_all('a', 'els => els.map(e => ({href: e.href, text: e.textContent.trim().substring(0,30)}))')
-                links_str = str(links[:20])
-                print(f'   ❌ Pronote introuvable. Liens dispo: {links_str}')
-                browser.close()
-                return {'notes_recentes': [], 'average': '0',
-                        'error': f'Pronote introuvable. URL={page.url} Liens={links_str[:200]}'}
-
-            # ETAPE 5 - Attendre Pronote
-            print('📍 Etape 5: Chargement Pronote...')
-            page_to_use = pronote_page if pronote_found else page
-            try:
-                page_to_use.wait_for_selector(
-                    '.label-menu_niveau0, ul.liste-cours, #GInterface, .GrilleDevoir',
-                    timeout=30000
-                )
-                print('   ✅ Interface Pronote chargée')
-            except Exception as e:
-                print(f'   ⚠️ Timeout interface Pronote: {e}')
-                page_to_use.wait_for_timeout(5000)
-
-            # ETAPE 6 - Notes
-            print('📍 Etape 6: Navigation vers Notes...')
-            try:
-                notes_menu = page_to_use.locator('.label-menu_niveau0', has_text='Notes')
-                notes_menu.wait_for(timeout=10000)
-                notes_menu.click()
-                page_to_use.wait_for_timeout(800)
-
-                mes_notes = page_to_use.locator('[data-genre="198"]')
-                mes_notes.wait_for(timeout=5000)
-                mes_notes.click()
-                page_to_use.wait_for_timeout(2000)
-
-                selector = page_to_use.locator('[role="combobox"][aria-label="Sélectionnez une période"]')
-                selector.wait_for(timeout=10000)
-                current = selector.text_content()
-
-                if 'Trimestre 2' not in (current or ''):
-                    selector.click()
-                    page_to_use.wait_for_timeout(500)
-                    option = page_to_use.locator('[role="option"]:has-text("Trimestre 2")')
-                    option.first.wait_for(timeout=5000)
-                    option.first.click()
-                    page_to_use.wait_for_timeout(2000)
-
-                page_to_use.wait_for_selector('[role="tree"]', timeout=10000)
-                html = page_to_use.inner_html('[role="tree"]')
-                soup = BeautifulSoup(html, 'html.parser')
-
-                notes_raw = []
-                for item in soup.select('[role="treeitem"]'):
-                    date_el = item.select_one('time')
-                    date_display = date_el.get_text(strip=True) if date_el else ''
-                    titres = item.select('div.titre-principal div.ie-ellipsis')
-                    matiere_full = titres[0].get_text(strip=True) if titres else ''
-                    matiere_parts = matiere_full.split('>')
-                    matiere_nom = matiere_parts[0].strip()
-                    sous_type = matiere_parts[1].strip() if len(matiere_parts) > 1 else ''
-                    note_zone = item.select_one('[aria-label*="Note élève"]')
-                    note_aria = note_zone.get('aria-label', '') if note_zone else ''
-                    note_match = re.search(r'Note élève\s*:\s*([\d,\.]+)(?:/([\d]+))?', note_aria)
-                    note_val = note_match.group(1).replace(',', '.') if note_match else ''
-                    note_sur = note_match.group(2) if (note_match and note_match.group(2)) else '20'
-                    note_el = item.select_one('span.note-devoir')
-                    note_display = note_el.get_text(strip=True) if note_el else ''
-                    if note_val:
-                        note_float = float(note_val)
-                        note_sur_int = int(note_sur)
-                        note_20 = round(note_float * 20 / note_sur_int, 2) if note_sur_int else note_float
-                        notes_raw.append({
-                            'date_display': date_display,
-                            'matiere': matiere_nom + (' > ' + sous_type if sous_type else ''),
-                            'note_brute': note_display or f'{note_val}/{note_sur}',
-                            'note_sur_20': note_20,
-                            'coefficient': 1,
-                        })
-
-                if notes_raw:
-                    total = sum(n['note_sur_20'] for n in notes_raw)
-                    average = round(total / len(notes_raw), 2)
-                else:
-                    average = 0
-
-                print(f'   ✅ {len(notes_raw)} notes trouvées, moyenne={average}')
-                browser.close()
-                return {'notes_recentes': notes_raw, 'average': str(average)}
-
-            except Exception as e:
-                print(f'   ❌ Erreur notes: {e}')
-                browser.close()
-                return {'notes_recentes': [], 'average': '0', 'error': f'Erreur notes: {e}'}
-
+        result = subprocess.run(
+            [sys.executable, 'pronote_worker.py'],
+            capture_output=True, text=True, timeout=180,
+            env={**__import__('os').environ}
+        )
+        # Les prints du worker vont dans stderr (visible dans logs Render)
+        if result.stderr:
+            print(result.stderr, flush=True)
+        if result.stdout:
+            # Dernière ligne = JSON result
+            lines = [l for l in result.stdout.strip().split('\n') if l]
+            json_line = lines[-1] if lines else '{}'
+            return json.loads(json_line)
+        return {'notes_recentes': [], 'average': '0', 'error': 'Pas de sortie du worker'}
+    except subprocess.TimeoutExpired:
+        return {'notes_recentes': [], 'average': '0', 'error': 'Timeout 180s'}
     except Exception as e:
-        print(f'❌ Erreur Pronote: {e}')
         return {'notes_recentes': [], 'average': '0', 'error': str(e)}
 
 
-
 def _scrape_in_background():
-    print('🔄 Scraping Pronote en arrière-plan...')
+    print('🔄 Scraping Pronote en arrière-plan...', flush=True)
     result = scrape_pronote()
     with _cache_lock:
         _cache['pronote'] = result
         _cache['pronote_ts'] = time.time()
         _cache['pronote_loading'] = False
-    print(f'✅ Pronote OK: moyenne={result.get("average")}')
+    print(f'✅ Pronote OK: moyenne={result.get("average")} erreur={result.get("error","")}', flush=True)
 
 
 def get_pronote_cached():
