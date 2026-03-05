@@ -143,47 +143,75 @@ def scrape_pronote():
             page.wait_for_timeout(4000)
             print(f'   URL: {page.url}')
 
-            # ETAPE 3 - Login EduConnect
-            print('📍 Etape 3: Saisie identifiants...')
-            
-            username_selectors = ['#username', '#login', 'input[name="username"]', 
-                                  'input[type="text"]', 'input[name="login"]', '#j_username']
-            for sel in username_selectors:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        print(f'   ✅ Champ username: {sel}')
-                        el.fill(PRONOTE_USER)
-                        break
-                except:
-                    pass
+            # ETAPE 3 - Login EduConnect (formulaire en 2 étapes)
+            print('📍 Etape 3: Saisie identifiants EduConnect...')
+            page.wait_for_timeout(3000)
+            print(f'   URL formulaire: {page.url}')
 
-            password_selectors = ['#password', 'input[type="password"]', 
-                                  'input[name="password"]', '#j_password']
-            for sel in password_selectors:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        print(f'   ✅ Champ password: {sel}')
-                        el.fill(PRONOTE_PASS)
-                        break
-                except:
-                    pass
+            # Etape 3a : saisir le username
+            try:
+                page.wait_for_selector('#username, input[name="username"], #j_username', timeout=10000)
+                username_field = page.locator('#username, input[name="username"], #j_username').first
+                username_field.fill(PRONOTE_USER)
+                print(f'   ✅ Username saisi: {PRONOTE_USER}')
+            except Exception as e:
+                print(f'   ❌ Champ username introuvable: {e}')
+                # dump HTML
+                print(f'   HTML: {page.inner_html("body")[:300]}')
 
-            submit_selectors = ['#bouton_valider', 'button[type="submit"]', 
-                               'input[type="submit"]', 'button:has-text("Connexion")',
-                               'button:has-text("Se connecter")', '.submit-btn']
-            for sel in submit_selectors:
+            # Chercher si password est déjà visible ou s'il faut valider d'abord
+            password_visible = False
+            try:
+                pwd = page.locator('#password, input[type="password"]').first
+                password_visible = pwd.is_visible(timeout=2000)
+            except:
+                pass
+
+            if not password_visible:
+                # Cliquer sur "Suivant" / "Continuer" pour afficher le champ password
+                print('   ⏩ Password non visible, clic sur Suivant...')
+                next_selectors = [
+                    '#bouton_valider',
+                    'button[type="submit"]',
+                    'input[type="submit"]',
+                    'button:has-text("Suivant")',
+                    'button:has-text("Continuer")',
+                    'button:has-text("Connexion")',
+                ]
+                for sel in next_selectors:
+                    try:
+                        el = page.locator(sel).first
+                        if el.is_visible(timeout=2000):
+                            print(f'   ✅ Bouton suivant: {sel}')
+                            el.click()
+                            break
+                    except:
+                        pass
+                page.wait_for_timeout(4000)
+                print(f'   URL après suivant: {page.url}')
+
+            # Etape 3b : saisir le password
+            try:
+                page.wait_for_selector('#password, input[type="password"], input[name="password"]', timeout=10000)
+                pwd_field = page.locator('#password, input[type="password"]').first
+                pwd_field.fill(PRONOTE_PASS)
+                print('   ✅ Password saisi')
+            except Exception as e:
+                print(f'   ❌ Champ password introuvable: {e}')
+
+            # Valider le formulaire
+            for sel in ['#bouton_valider', 'button[type="submit"]', 'input[type="submit"]',
+                        'button:has-text("Connexion")', 'button:has-text("Se connecter")']:
                 try:
                     el = page.locator(sel).first
                     if el.is_visible(timeout=2000):
-                        print(f'   ✅ Bouton submit: {sel}')
+                        print(f'   ✅ Submit final: {sel}')
                         el.click()
                         break
                 except:
                     pass
 
-            page.wait_for_timeout(6000)
+            page.wait_for_timeout(8000)
             print(f'   URL après login: {page.url}')
             print(f'   Titre: {page.title()}')
 
