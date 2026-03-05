@@ -76,8 +76,21 @@ def scrape():
             print(f'STEP3_URL: {page.url}', flush=True)
             print(f'STEP3_TITLE: {page.title()}', flush=True)
 
+            # Etape 3b : page de confirmation SAML ("Confirmation de l'identité")
+            # EduConnect affiche une page intermédiaire avec #bouton_valider à cliquer
             if 'educonnect' in page.url.lower():
-                print(f'LOGIN_FAILED: encore sur EduConnect', flush=True)
+                print(f'CONFIRM_PAGE: {page.title()} - {page.url}', flush=True)
+                try:
+                    page.wait_for_selector('#bouton_valider', timeout=5000)
+                    page.click('#bouton_valider')
+                    print('CONFIRM_CLICKED: #bouton_valider', flush=True)
+                    page.wait_for_timeout(6000)
+                    print(f'AFTER_CONFIRM_URL: {page.url}', flush=True)
+                except Exception as e:
+                    print(f'CONFIRM_ERROR: {e}', flush=True)
+
+            # Vérification finale
+            if 'educonnect' in page.url.lower():
                 browser.close()
                 return {'notes_recentes': [], 'average': '0', 'emploi_du_temps': [],
                         'cantine': [], 'error': f'Login EduConnect échoué. URL={page.url}'}
