@@ -104,17 +104,28 @@ def scrape_pronote():
             page.wait_for_load_state('networkidle', timeout=30000)
             page.wait_for_timeout(5000)
             
+            # Screenshot pour debug
+            page.screenshot(path='/tmp/toutatice_debug.png')
+            print('📸 Screenshot sauvegardé: /tmp/toutatice_debug.png')
+            
+            # Afficher le HTML de la page pour debug
+            html_content = page.content()
+            print(f'📄 HTML contient "Pronote": {"Pronote" in html_content}')
+            print(f'📄 HTML contient "data-dnma-outil": {"data-dnma-outil" in html_content}')
+            
             # Chercher le lien Pronote avec plusieurs sélecteurs possibles
             pronote_link = None
             selectors = [
                 '[data-dnma-outil="PRONOTE"]',
                 'a:has-text("Pronote")',
                 '.card[data-application-urls*="pronote"] a',
+                'a[title*="Pronote"]',
             ]
             
             for selector in selectors:
-                if page.locator(selector).count() > 0:
-                    print(f'🔍 Bouton Pronote trouvé avec: {selector}')
+                count = page.locator(selector).count()
+                print(f'🔍 Sélecteur "{selector}": {count} éléments trouvés')
+                if count > 0:
                     pronote_link = page.locator(selector).first
                     break
             
