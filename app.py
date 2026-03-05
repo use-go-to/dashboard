@@ -26,8 +26,8 @@ WEATHER_LON  = os.environ.get('WEATHER_LON', '-1.9549')
 
 # Cache en mémoire (Render = éphémère, pas de SQLite persistant)
 _cache = {
-    'pronote': {},
-    'sms': [],       # [{ sender, message, time, read }]
+    'pronote': {'notes_recentes': [], 'average': '--', 'emploi_du_temps': [], 'cantine': []},
+    'sms': [],
     'pronote_ts': 0,
 }
 _cache_lock = threading.Lock()
