@@ -48,23 +48,31 @@ def scrape():
             # <button id="bouton_valider" ...>
             print('STEP3: Login', flush=True)
             page.wait_for_selector('#username', timeout=15000)
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(2000)
+            print(f'PAGE_URL_BEFORE_LOGIN: {page.url}', flush=True)
 
-            # Cliquer puis remplir username
-            page.click('#username')
+            # Vider et remplir username via triple_click + type (simule clavier réel)
+            page.triple_click('#username')
             page.wait_for_timeout(300)
-            page.fill('#username', PRONOTE_USER)
-            print(f'USERNAME: {page.input_value("#username")}', flush=True)
+            page.keyboard.type(PRONOTE_USER, delay=80)
+            val_u = page.input_value('#username')
+            print(f'USERNAME_VALUE: "{val_u}"', flush=True)
 
-            # Remplir password
-            page.click('#password')
+            # Tab pour passer au champ password
+            page.keyboard.press('Tab')
+            page.wait_for_timeout(500)
+
+            # Vider et remplir password
+            page.triple_click('#password')
             page.wait_for_timeout(300)
-            page.fill('#password', PRONOTE_PASS)
-            print(f'PASSWORD_LEN: {len(page.input_value("#password"))}', flush=True)
+            page.keyboard.type(PRONOTE_PASS, delay=80)
+            val_p = page.input_value('#password')
+            print(f'PASSWORD_LEN: {len(val_p)}', flush=True)
 
-            # Valider
+            # Cliquer bouton valider
+            page.wait_for_timeout(500)
             page.click('#bouton_valider')
-            page.wait_for_timeout(6000)
+            page.wait_for_timeout(8000)
             print(f'STEP3_URL: {page.url}', flush=True)
             print(f'STEP3_TITLE: {page.title()}', flush=True)
 
