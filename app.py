@@ -68,14 +68,31 @@ def scrape_pronote():
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=['--no-sandbox','--disable-setuid-sandbox',
-                      '--disable-dev-shm-usage','--disable-gpu',
-                      '--disable-blink-features=AutomationControlled']
+                args=[
+                    '--no-sandbox','--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage','--disable-gpu',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-infobars',
+                    '--window-size=1280,900',
+                ]
             )
             ctx = browser.new_context(
                 viewport={'width':1280,'height':900},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                locale='fr-FR',
+                timezone_id='Europe/Paris',
+                extra_http_headers={
+                    'Accept-Language': 'fr-FR,fr;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                }
             )
+            # Masquer les traces d'automatisation
+            ctx.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR','fr']});
+                window.chrome = {runtime: {}};
+            """)
             page = ctx.new_page()
 
             # ETAPE 1 - Toutatice
@@ -150,14 +167,36 @@ def scrape_pronote():
 
             # Etape 3a : saisir le username
             try:
-                page.wait_for_selector('#username, input[name="username"], #j_username', timeout=10000)
-                username_field = page.locator('#username, input[name="username"], #j_username').first
-                username_field.fill(PRONOTE_USER)
-                print(f'   ✅ Username saisi: {PRONOTE_USER}')
+                page.wait_for_selector('input', timeout=10000)
+                # Dump tous les inputs pour debug
+                inputs = page.eval_on_selector_all('input', 'els => els.map(e => ({id:e.id, name:e.name, type:e.type, placeholder:e.placeholder}))')
+                print(f'   Inputs trouvés: {inputs}')
+                
+                username_field = None
+                for sel in ['#username', 'input[name="username"]', '#j_username', 
+                            'input[name="j_username"]', 'input[type="text"]',
+                            'input[autocomplete="username"]']:
+                    try:
+                        el = page.locator(sel).first
+                        if el.is_visible(timeout=1000):
+                            username_field = el
+                            print(f'   ✅ Username field: {sel}')
+                            break
+                    except:
+                        pass
+                
+                if username_field:
+                    username_field.click()
+                    page.wait_for_timeout(500)
+                    username_field.fill('')
+                    username_field.type(PRONOTE_USER, delay=50)
+                    print(f'   ✅ Username saisi: {PRONOTE_USER}')
+                else:
+                    print(f'   ❌ Aucun champ username. Page HTML:')
+                    print(page.inner_html('body')[:600])
             except Exception as e:
-                print(f'   ❌ Champ username introuvable: {e}')
-                # dump HTML
-                print(f'   HTML: {page.inner_html("body")[:300]}')
+                print(f'   ❌ Erreur username: {e}')
+                print(f'   HTML: {page.inner_html("body")[:600]}')
 
             # Chercher si password est déjà visible ou s'il faut valider d'abord
             password_visible = False
@@ -389,6 +428,18 @@ def api_data():
     with _cache_lock:
         loading = _cache.get('pronote_loading', False)
     return jsonify({'pronote': pronote, 'loading': loading})
+
+
+@app.route('/api/scrape-now')
+def api_scrape_now():
+    """Force un nouveau scraping Pronote immédiatement"""
+    with _cache_lock:
+        _cache['pronote_ts'] = 0  # Invalide le cache
+        _cache['pronote_loading'] = False
+    pronote = get_pronote_cached()
+    with _cache_lock:
+        loading = _cache.get('pronote_loading', False)
+    return jsonify({'message': 'Scraping lancé en arrière-plan', 'loading': loading})
 
 
 @app.route('/api/weather-free')
